@@ -1,0 +1,230 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Орбита</title>
+<meta name="description" content="Аркада в браузере: кружи вокруг звезды, прыгай между орбитами, уворачивайся от астероидов. Работает на телефоне.">
+<meta name="theme-color" content="#05040d">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' rx='14' fill='%2305040d'/><circle cx='32' cy='32' r='7' fill='%23ffcc66'/><circle cx='32' cy='32' r='16' fill='none' stroke='%237a5cff' stroke-width='2'/><circle cx='32' cy='32' r='25' fill='none' stroke='%237a5cff' stroke-width='2'/><circle cx='55' cy='24' r='5' fill='%2300f0d0'/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Russo+One&family=Exo+2:wght@500;700&display=swap">
+<style>
+/* Одна тёмная «космическая» тема намеренно: игра живёт в своём мире. Полноэкранный canvas + оверлеи меню. */
+:root { --void: #05040d; --star: #ffcc66; --ring: #7a5cff; --me: #00f0d0; --rock: #ff5470; --text: #f1eeff; --soft: #a49dc8; color-scheme: dark; }
+[hidden] { display: none !important; }
+html, body { margin: 0; height: 100%; background: var(--void); color: var(--text); overflow: hidden; font-family: "Exo 2", system-ui, sans-serif; touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
+.hud { position: fixed; top: max(14px, env(safe-area-inset-top)); left: 0; right: 0; text-align: center; pointer-events: none; }
+.score { font: 44px/1 "Russo One", sans-serif; letter-spacing: .04em; text-shadow: 0 0 18px rgba(122,92,255,.8); font-variant-numeric: tabular-nums; }
+.best { color: var(--soft); font-size: 14px; margin-top: 4px; }
+.pause { position: fixed; top: max(14px, env(safe-area-inset-top)); right: max(14px, env(safe-area-inset-right)); width: 44px; height: 44px; border-radius: 12px; border: 1px solid rgba(255,255,255,.15); background: rgba(255,255,255,.06); color: var(--text); font-size: 18px; cursor: pointer; }
+.overlay { position: fixed; inset: 0; display: grid; place-items: center; padding: 24px max(16px, env(safe-area-inset-right)) 24px max(16px, env(safe-area-inset-left)); background: radial-gradient(ellipse at center, rgba(5,4,13,.35), rgba(5,4,13,.88)); text-align: center; }
+.box { max-width: 420px; }
+h1 { font: 64px/1 "Russo One", sans-serif; margin: 0 0 10px; letter-spacing: .08em; background: linear-gradient(180deg, #fff, #b9a8ff); -webkit-background-clip: text; background-clip: text; color: transparent; }
+.box p { color: var(--soft); margin: 0 0 18px; line-height: 1.5; }
+.keys { display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; text-align: left; margin: 0 auto 22px; max-width: 320px; font-size: 15px; }
+.keys b { color: var(--me); }
+.play { font: 22px "Russo One", sans-serif; letter-spacing: .06em; border: 0; border-radius: 16px; padding: 16px 42px; cursor: pointer; color: #05040d; background: linear-gradient(90deg, var(--me), #8cffd0); box-shadow: 0 0 30px rgba(0,240,208,.45); }
+.play:focus-visible, .pause:focus-visible, .link:focus-visible { outline: 3px solid var(--star); outline-offset: 3px; }
+.big { font: 72px/1 "Russo One", sans-serif; margin: 6px 0; }
+.link { display: inline-block; margin-top: 16px; color: var(--soft); background: none; border: 0; font: inherit; cursor: pointer; text-decoration: underline; }
+.more { position: fixed; bottom: max(12px, env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; font-size: 13px; color: var(--soft); }
+.more a { color: var(--soft); }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div class="hud" id="hud" hidden><div class="score" id="score">0</div><div class="best" id="bestHud"></div></div>
+<button class="pause" id="pauseBtn" hidden aria-label="Пауза">❚❚</button>
+
+<div class="overlay" id="menu">
+  <div class="box">
+    <h1>ОРБИТА</h1>
+    <p>Ты — комета на орбите звезды. Прыгай между тремя кольцами, уворачивайся от астероидов и собирай кристаллы. Чем дольше летишь — тем быстрее.</p>
+    <div class="keys"><b>Тап / пробел</b><span>прыгнуть на внешнюю орбиту</span><b>↓ / S</b><span>нырнуть на внутреннюю</span><b>◆ кристалл</b><span>+10 очков</span></div>
+    <button class="play" id="start">ИГРАТЬ</button>
+    <div class="best" id="bestMenu" style="margin-top:14px"></div>
+  </div>
+</div>
+<div class="overlay" id="over" hidden>
+  <div class="box">
+    <p style="margin:0">Столкновение!</p>
+    <div class="big" id="final">0</div>
+    <p id="record"></p>
+    <button class="play" id="again">ЕЩЁ РАЗ</button><br>
+    <button class="link" id="share">Скопировать результат</button>
+  </div>
+</div>
+<div class="overlay" id="paused" hidden><div class="box"><h1 style="font-size:44px">ПАУЗА</h1><button class="play" id="resume">ДАЛЬШЕ</button></div></div>
+<div class="more" id="more">Ещё сайты: <a href="https://strimsnaener-cpu.github.io/utilka/">Утилька</a> · <a href="https://strimsnaener-cpu.github.io/zubrilka/">Зубрилка</a> · <a href="https://strimsnaener-cpu.github.io/prevyu/">Превьюшка</a></div>
+
+<script>
+(function () {
+"use strict";
+const cv = document.getElementById("c"), ctx = cv.getContext("2d");
+const $ = (id) => document.getElementById(id);
+let W = 0, H = 0, S = 0, DPR = 1, cx = 0, cy = 0, RINGS = [];
+const getBest = () => { try { return +localStorage.getItem("orbita:best") || 0; } catch (e) { return 0; } };
+const setBest = (v) => { try { localStorage.setItem("orbita:best", v); } catch (e) {} };
+
+function resize() {
+  DPR = Math.min(window.devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight;
+  cv.width = W * DPR; cv.height = H * DPR; ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  S = Math.min(W, H); cx = W / 2; cy = H / 2 + Math.min(30, H * 0.03);
+  RINGS = [0.17, 0.28, 0.39].map((k) => k * S);
+}
+addEventListener("resize", resize); resize();
+
+// фон: звёзды
+const stars = Array.from({ length: 160 }, () => ({ x: Math.random(), y: Math.random(), r: Math.random() * 1.4 + 0.2, p: Math.random() * 6 }));
+
+// звук
+let ac = null;
+function tone(f, d, type, vol) {
+  try {
+    ac = ac || new (window.AudioContext || window.webkitAudioContext)();
+    const o = ac.createOscillator(), g = ac.createGain(); o.type = type || "sine"; o.frequency.value = f;
+    o.connect(g); g.connect(ac.destination); const t = ac.currentTime;
+    g.gain.setValueAtTime(vol || 0.08, t); g.gain.exponentialRampToValueAtTime(0.0001, t + d);
+    o.start(t); o.stop(t + d);
+  } catch (e) {}
+}
+
+// состояние игры
+let st = "menu", me, obs, parts, trail, score, time, spawnT, shake, last = 0, best = getBest();
+function reset() {
+  me = { a: -Math.PI / 2, ring: 1, r: RINGS[1] || 100 };
+  obs = []; parts = []; trail = []; score = 0; time = 0; spawnT = 1.2; shake = 0;
+}
+reset();
+const speed = () => 1.35 + Math.min(1.9, time * 0.028);       // рад/с игрока
+const gap = () => Math.max(0.42, 1.1 - time * 0.012);          // секунд между появлениями
+
+function spawn() {
+  const isGem = Math.random() < 0.22;
+  const ahead = me.a + Math.PI * (0.85 + Math.random() * 0.3);
+  // не перекрывать все три кольца в одном секторе
+  const near = obs.filter((o) => !o.gem && Math.abs(angDiff(o.a, ahead)) < 0.55).map((o) => o.ring);
+  let free = [0, 1, 2].filter((r) => !near.includes(r));
+  if (!isGem && free.length <= 1) return;
+  const ring = free[Math.floor(Math.random() * free.length)];
+  obs.push({ ring, a: ahead, rel: ahead - me.a, gem: isGem, size: isGem ? S * 0.018 : S * (0.022 + Math.random() * 0.016), spin: Math.random() * 6, vs: (Math.random() - 0.5) * 3,
+    shape: Array.from({ length: 9 }, () => 0.72 + Math.random() * 0.4), drift: 0.35 + Math.random() * 0.25 });
+}
+const angDiff = (a, b) => { let d = (a - b) % (Math.PI * 2); if (d > Math.PI) d -= Math.PI * 2; if (d < -Math.PI) d += Math.PI * 2; return d; };
+const pos = (r, a) => [cx + Math.cos(a) * r, cy + Math.sin(a) * r];
+
+function burst(x, y, color, n, sp) { for (let i = 0; i < n; i++) { const a = Math.random() * 7, v = (Math.random() * 0.8 + 0.2) * sp; parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 1, color }); } }
+
+function jump(dir) {
+  if (st !== "play") return;
+  const n = dir > 0 ? (me.ring + 1) % 3 : (me.ring + 2) % 3;
+  me.ring = n; tone(dir > 0 ? 520 + n * 120 : 420 - n * 60, 0.12, "triangle", 0.06);
+}
+
+function update(dt) {
+  time += dt; score += dt * 4;
+  me.a += speed() * dt;
+  me.r += (RINGS[me.ring] - me.r) * Math.min(1, dt * 14);
+  const [px, py] = pos(me.r, me.a);
+  trail.push({ x: px, y: py }); if (trail.length > 22) trail.shift();
+  spawnT -= dt; if (spawnT <= 0) { spawn(); spawnT = gap(); }
+  for (const o of obs) { o.a -= o.drift * dt; o.rel -= (o.drift + speed()) * dt; o.spin += o.vs * dt; }
+  obs = obs.filter((o) => {
+    const [ox, oy] = pos(RINGS[o.ring], o.a), d = Math.hypot(ox - px, oy - py);
+    if (d < o.size + S * 0.016) {
+      if (o.gem) { score += 10; burst(ox, oy, "#00f0d0", 18, 160); tone(980, 0.15, "sine", 0.07); setTimeout(() => tone(1320, 0.18, "sine", 0.06), 70); return false; }
+      crash(px, py); return false;
+    }
+    return o.rel > -1.2; // пролетевшие далеко позади убираем
+  });
+  for (const p of parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt * 1.4; }
+  parts = parts.filter((p) => p.life > 0);
+  $("score").textContent = Math.floor(score);
+}
+
+function crash(x, y) {
+  st = "over"; shake = 18; burst(x, y, "#ff5470", 40, 260); burst(x, y, "#ffcc66", 20, 180);
+  tone(110, 0.5, "sawtooth", 0.09); tone(70, 0.6, "square", 0.05);
+  const s = Math.floor(score), rec = s > best; if (rec) { best = s; setBest(s); }
+  setTimeout(() => {
+    $("final").textContent = s; $("record").textContent = rec ? "🏆 Новый рекорд!" : `Рекорд: ${best}`;
+    $("over").hidden = false; $("hud").hidden = true; $("pauseBtn").hidden = true; $("more").hidden = false; $("again").focus();
+  }, 750);
+}
+
+function draw(t) {
+  ctx.save();
+  ctx.fillStyle = "#05040d"; ctx.fillRect(0, 0, W, H);
+  if (shake > 0) { ctx.translate((Math.random() - 0.5) * shake, (Math.random() - 0.5) * shake); shake *= 0.9; if (shake < 0.5) shake = 0; }
+  for (const s of stars) { ctx.globalAlpha = 0.35 + 0.35 * Math.sin(t / 900 + s.p); ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(s.x * W, s.y * H, s.r, 0, 7); ctx.fill(); }
+  ctx.globalAlpha = 1;
+  // звезда
+  const pulse = 1 + Math.sin(t / 400) * 0.04, sr = S * 0.075 * pulse;
+  const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, sr * 3.2);
+  g.addColorStop(0, "rgba(255,220,140,1)"); g.addColorStop(0.3, "rgba(255,170,60,.55)"); g.addColorStop(1, "rgba(255,120,40,0)");
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(cx, cy, sr * 3.2, 0, 7); ctx.fill();
+  ctx.fillStyle = "#fff1cc"; ctx.beginPath(); ctx.arc(cx, cy, sr * 0.8, 0, 7); ctx.fill();
+  // кольца
+  RINGS.forEach((r, i) => {
+    ctx.strokeStyle = i === me.ring && st === "play" ? "rgba(140,115,255,.75)" : "rgba(122,92,255,.28)";
+    ctx.lineWidth = i === me.ring && st === "play" ? 2.2 : 1.4; ctx.setLineDash([4, 10]); ctx.lineDashOffset = -t / 60 * (i + 1);
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, 7); ctx.stroke();
+  });
+  ctx.setLineDash([]);
+  // объекты
+  for (const o of obs) {
+    const [x, y] = pos(RINGS[o.ring], o.a);
+    ctx.save(); ctx.translate(x, y); ctx.rotate(o.spin);
+    if (o.gem) {
+      ctx.shadowColor = "#00f0d0"; ctx.shadowBlur = 16; ctx.fillStyle = "#7dfff0";
+      ctx.beginPath(); ctx.moveTo(0, -o.size * 1.3); ctx.lineTo(o.size, 0); ctx.lineTo(0, o.size * 1.3); ctx.lineTo(-o.size, 0); ctx.closePath(); ctx.fill();
+    } else {
+      ctx.shadowColor = "#ff5470"; ctx.shadowBlur = 12; ctx.fillStyle = "#3a1830"; ctx.strokeStyle = "#ff5470"; ctx.lineWidth = 2;
+      ctx.beginPath(); o.shape.forEach((k, i) => { const a = i / o.shape.length * Math.PI * 2; ctx[i ? "lineTo" : "moveTo"](Math.cos(a) * o.size * k, Math.sin(a) * o.size * k); }); ctx.closePath(); ctx.fill(); ctx.stroke();
+    }
+    ctx.restore();
+  }
+  // хвост и игрок
+  if (st !== "over" || shake > 8) {
+    trail.forEach((p, i) => { const k = i / trail.length; ctx.globalAlpha = k * 0.6; ctx.fillStyle = "#00f0d0"; ctx.beginPath(); ctx.arc(p.x, p.y, S * 0.014 * k, 0, 7); ctx.fill(); });
+    ctx.globalAlpha = 1;
+    if (st !== "over") { const [px, py] = pos(me.r, me.a); ctx.shadowColor = "#00f0d0"; ctx.shadowBlur = 22; ctx.fillStyle = "#eafffb"; ctx.beginPath(); ctx.arc(px, py, S * 0.016, 0, 7); ctx.fill(); ctx.shadowBlur = 0; }
+  }
+  for (const p of parts) { ctx.globalAlpha = Math.max(0, p.life); ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(p.x, p.y, 2.4, 0, 7); ctx.fill(); }
+  ctx.restore();
+}
+
+function loop(t) {
+  const dt = Math.min(0.05, (t - last) / 1000 || 0); last = t;
+  if (st === "play") update(dt);
+  else if (st === "menu") { me.a += dt * 0.9; me.r = RINGS[1]; const [px, py] = pos(me.r, me.a); trail.push({ x: px, y: py }); if (trail.length > 22) trail.shift(); }
+  else if (st === "over") { for (const p of parts) { p.x += p.vx * dt; p.y += p.vy * dt; p.vx *= 0.96; p.vy *= 0.96; p.life -= dt * 1.2; } parts = parts.filter((p) => p.life > 0); }
+  draw(t);
+  requestAnimationFrame(loop);
+}
+requestAnimationFrame(loop);
+
+function start() {
+  reset(); st = "play"; $("menu").hidden = true; $("over").hidden = true; $("paused").hidden = true; $("more").hidden = true;
+  $("hud").hidden = false; $("pauseBtn").hidden = false; $("bestHud").textContent = best ? `рекорд ${best}` : ""; tone(660, 0.1, "triangle", 0.05);
+}
+function pause() { if (st !== "play") return; st = "pause"; $("paused").hidden = false; }
+function resume() { if (st !== "pause") return; st = "play"; $("paused").hidden = true; last = performance.now(); }
+$("bestMenu").textContent = best ? `Твой рекорд: ${best}` : "";
+$("start").onclick = start; $("again").onclick = start; $("resume").onclick = resume;
+$("pauseBtn").onclick = (e) => { e.stopPropagation(); pause(); };
+$("share").onclick = async () => { const txt = `Я набрал ${$("final").textContent} очков в «Орбите»! Попробуй побить: ${location.href}`; try { await navigator.clipboard.writeText(txt); $("share").textContent = "Скопировано ✓"; } catch (e) { $("share").textContent = txt; } };
+cv.addEventListener("pointerdown", (e) => { e.preventDefault(); jump(1); });
+addEventListener("keydown", (e) => {
+  if (e.repeat) return;
+  if (e.code === "Space" || e.key === "ArrowUp" || e.key === "w" || e.key === "ц") { e.preventDefault(); if (st === "play") jump(1); else if (st === "menu" || (st === "over" && !$("over").hidden)) start(); else if (st === "pause") resume(); }
+  else if (e.key === "ArrowDown" || e.key === "s" || e.key === "ы") { e.preventDefault(); jump(-1); }
+  else if (e.key === "Escape" || e.key === "p" || e.key === "з") { st === "play" ? pause() : resume(); }
+});
+document.addEventListener("visibilitychange", () => { if (document.hidden) pause(); });
+})();
+</script>
+</body>
+</html>
